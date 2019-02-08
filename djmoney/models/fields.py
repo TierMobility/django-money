@@ -5,6 +5,7 @@ from decimal import Decimal
 from warnings import warn
 
 from django import VERSION
+from django.core import exceptions
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Field, Func, Value
@@ -194,6 +195,37 @@ class CurrencyField(models.CharField):
         kwargs["max_length"] = 3
         self.price_field = price_field
         super(CurrencyField, self).__init__(default=default, **kwargs)
+
+    def validate(self, value, model_instance):
+        """
+                Validate value and raise ValidationError if necessary. Subclasses
+                should override this to provide validation logic.
+                """
+        if not self.editable:
+            # Skip validation for non-editable fields.
+            return
+
+        if self.choices and value not in self.empty_values:
+            for option_key, option_value in self.choices:
+                if isinstance(option_value, (list, tuple)):
+                    # This is an optgroup, so look inside the group for
+                    # options.
+                    for optgroup_key, optgroup_value in option_value:
+                        if value == optgroup_key:
+                            return
+                elif value == get_currency_by_name(option_key):
+                    return
+            raise exceptions.ValidationError(
+                self.error_messages["invalid_choice"],
+                code="invalid_choice",
+                params={"value": value},
+            )
+
+        if value is None and not self.null:
+            raise exceptions.ValidationError(self.error_messages["null"], code="null")
+
+        if not self.blank and value in self.empty_values:
+            raise exceptions.ValidationError(self.error_messages["blank"], code="blank")
 
     def contribute_to_class(self, cls, name):
         if name not in [f.name for f in cls._meta.fields]:
